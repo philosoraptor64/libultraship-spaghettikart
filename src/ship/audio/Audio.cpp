@@ -79,9 +79,11 @@ AudioBackend Audio::GetSavedAudioBackend() {
         return AudioBackend::SDL;
     }
 
+#if !defined(__IOS__) // iOS has no CoreAudio player; a saved "coreaudio" falls through to SDL
     if (backendName == "coreaudio") {
         return AudioBackend::COREAUDIO;
     }
+#endif
 
     if (backendName == "sdl") {
         return AudioBackend::SDL;
@@ -97,7 +99,7 @@ AudioBackend Audio::GetSavedAudioBackend() {
     return AudioBackend::WASAPI;
 #endif
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(__IOS__) // macOS only; iOS uses SDL
     return AudioBackend::COREAUDIO;
 #endif
 
