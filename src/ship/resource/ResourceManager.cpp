@@ -9,6 +9,30 @@
 #include "ship/config/ConsoleVariable.h"
 #include "ship/Context.h"
 
+/* A game may route some of its allocations elsewhere (SpaghettiKart's rollback
+ * sim heap); resource manager state must always use the normal heap, so the
+ * game can register a suspend/resume pair here. */
+extern "C" {
+int (*LUS_AllocScopeSuspend)(void) = nullptr;
+void (*LUS_AllocScopeResume)(int) = nullptr;
+}
+
+namespace {
+struct AllocScopeGuard {
+    int saved = 0;
+    AllocScopeGuard() {
+        if (LUS_AllocScopeSuspend) {
+            saved = LUS_AllocScopeSuspend();
+        }
+    }
+    ~AllocScopeGuard() {
+        if (LUS_AllocScopeResume) {
+            LUS_AllocScopeResume(saved);
+        }
+    }
+};
+} // namespace
+
 namespace Ship {
 
 ResourceFilter::ResourceFilter(const std::list<std::string>& includeMasks, const std::list<std::string>& excludeMasks,
@@ -75,6 +99,7 @@ bool ResourceManager::IsLoaded() {
 }
 
 std::shared_ptr<File> ResourceManager::LoadFileProcess(const std::string& filePath) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto file = mArchiveManager->LoadFile(filePath);
     if (file != nullptr) {
         SPDLOG_TRACE("Loaded File {} on ResourceManager", filePath);
@@ -85,6 +110,7 @@ std::shared_ptr<File> ResourceManager::LoadFileProcess(const std::string& filePa
 }
 
 std::shared_ptr<File> ResourceManager::LoadFileProcess(const ResourceIdentifier& identifier) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     if (identifier.Parent == nullptr) {
         return LoadFileProcess(identifier.Path);
     }
@@ -100,6 +126,7 @@ std::shared_ptr<File> ResourceManager::LoadFileProcess(const ResourceIdentifier&
 
 std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceIdentifier& identifier, bool loadExact,
                                                                 std::shared_ptr<ResourceInitData> initData) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     // Check for and remove the OTR signature
     if (OtrSignatureCheck(identifier.Path.c_str())) {
         const auto newFilePath = identifier.Path.substr(7);
@@ -192,6 +219,7 @@ std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const ResourceId
 
 std::shared_ptr<IResource> ResourceManager::LoadResourceProcess(const std::string& filePath, bool loadExact,
                                                                 std::shared_ptr<ResourceInitData> initData) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     return LoadResourceProcess({ filePath, mDefaultCacheOwner, mDefaultCacheArchive }, loadExact, initData);
 }
 
@@ -227,6 +255,7 @@ ResourceManager::LoadResourceAsync(const std::string& filePath, bool loadExact, 
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifier& identifier, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResourceAsync(identifier, loadExact, BS::pr::highest, initData).get();
     if (resource == nullptr) {
         SPDLOG_TRACE("Failed to load resource file at path {}", identifier.Path);
@@ -236,11 +265,13 @@ std::shared_ptr<IResource> ResourceManager::LoadResource(const ResourceIdentifie
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(const std::string& filePath, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     return LoadResource({ filePath, mDefaultCacheOwner, mDefaultCacheArchive }, loadExact, initData);
 }
 
 std::shared_ptr<IResource> ResourceManager::LoadResource(uint64_t crc, bool loadExact,
                                                          std::shared_ptr<ResourceInitData> initData) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     const std::string* hashStr = GetArchiveManager()->HashToString(crc);
     if (hashStr == nullptr || hashStr->length() == 0) {
         SPDLOG_TRACE("ResourceLoad: Unknown crc {}\n", crc);
@@ -279,11 +310,13 @@ ResourceManager::CheckCache(const std::string& filePath, bool loadExact) {
 }
 
 std::shared_ptr<IResource> ResourceManager::GetCachedResource(const ResourceIdentifier& identifier, bool loadExact) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     // Gets the cached resource based on filePath.
     return GetCachedResource(CheckCache(identifier, loadExact));
 }
 
 std::shared_ptr<IResource> ResourceManager::GetCachedResource(const std::string& filePath, bool loadExact) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     // Gets the cached resource based on filePath.
     return GetCachedResource({ filePath, mDefaultCacheOwner, mDefaultCacheArchive }, loadExact);
 }
@@ -343,14 +376,17 @@ ResourceManager::LoadResourcesAsync(const std::string& searchMask, BS::priority_
 }
 
 std::shared_ptr<std::vector<std::shared_ptr<IResource>>> ResourceManager::LoadResources(const std::string& searchMask) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     return LoadResources({ { searchMask }, {}, mDefaultCacheOwner, mDefaultCacheArchive });
 }
 
 std::shared_ptr<std::vector<std::shared_ptr<IResource>>> ResourceManager::LoadResources(const ResourceFilter& filter) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     return LoadResourcesAsync(filter, BS::pr::highest).get();
 }
 
 void ResourceManager::DirtyResources(const ResourceFilter& filter) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     mThreadPool->submit_task([this, filter]() -> void {
         auto list = GetArchiveManager()->ListFiles(filter.IncludeMasks, filter.ExcludeMasks);
 
@@ -367,26 +403,32 @@ void ResourceManager::DirtyResources(const ResourceFilter& filter) {
 }
 
 void ResourceManager::DirtyResources(const std::string& searchMask) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     DirtyResources({ { searchMask }, {}, mDefaultCacheOwner, mDefaultCacheArchive });
 }
 
 void ResourceManager::UnloadResourcesAsync(const std::string& searchMask, BS::priority_t priority) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     UnloadResourcesAsync({ { searchMask }, {}, mDefaultCacheOwner, mDefaultCacheArchive }, priority);
 }
 
 void ResourceManager::UnloadResourcesAsync(const ResourceFilter& filter, BS::priority_t priority) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     mThreadPool->submit_task([this, filter]() -> void { UnloadResourcesProcess(filter); }, priority);
 }
 
 void ResourceManager::UnloadResources(const std::string& searchMask) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     UnloadResources({ { searchMask }, {}, mDefaultCacheOwner, mDefaultCacheArchive });
 }
 
 void ResourceManager::UnloadResources(const ResourceFilter& filter) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     UnloadResourcesProcess(filter);
 }
 
 void ResourceManager::UnloadResourcesProcess(const ResourceFilter& filter) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto list = GetArchiveManager()->ListFiles(filter.IncludeMasks, filter.ExcludeMasks);
 
     for (const auto& key : *list.get()) {
@@ -403,6 +445,7 @@ std::shared_ptr<ResourceLoader> ResourceManager::GetResourceLoader() {
 }
 
 size_t ResourceManager::UnloadResource(const ResourceIdentifier& identifier) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     // Store a shared pointer here so that erase doesn't destruct the resource.
     // The resource will attempt to load other resources on the destructor, and this will fail because we already hold
     // the mutex.
@@ -418,16 +461,19 @@ size_t ResourceManager::UnloadResource(const ResourceIdentifier& identifier) {
 }
 
 size_t ResourceManager::UnloadResource(const std::string& filePath) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     return UnloadResource({ filePath, mDefaultCacheOwner, mDefaultCacheArchive });
 }
 
 void ResourceManager::CacheExternalResource(const std::string& filePath, std::shared_ptr<IResource> resource) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     const std::lock_guard<std::mutex> lock(mMutex);
     mResourceCache[{ filePath, mDefaultCacheOwner, mDefaultCacheArchive }] = resource;
 }
 
 bool ResourceManager::WriteResource(const ResourceIdentifier& identifier, const std::vector<uint8_t>& data,
                                     bool unloadFile) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     std::shared_ptr<Archive> archive = identifier.Parent;
 
     if (!archive) {
@@ -463,6 +509,7 @@ void ResourceManager::SetAltAssetsEnabled(bool isEnabled) {
 }
 
 size_t ResourceManager::GetResourceSize(std::shared_ptr<IResource> resource) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     if (resource == nullptr) {
         return 0;
     }
@@ -471,18 +518,21 @@ size_t ResourceManager::GetResourceSize(std::shared_ptr<IResource> resource) {
 }
 
 size_t ResourceManager::GetResourceSize(const char* name) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(name);
 
     return GetResourceSize(resource);
 }
 
 size_t ResourceManager::GetResourceSize(uint64_t crc) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(crc);
 
     return GetResourceSize(resource);
 }
 
 bool ResourceManager::GetResourceIsCustom(std::shared_ptr<IResource> resource) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     if (resource == nullptr) {
         return false;
     }
@@ -491,18 +541,21 @@ bool ResourceManager::GetResourceIsCustom(std::shared_ptr<IResource> resource) {
 }
 
 bool ResourceManager::GetResourceIsCustom(const char* name) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(name);
 
     return GetResourceIsCustom(resource);
 }
 
 bool ResourceManager::GetResourceIsCustom(uint64_t crc) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(crc);
 
     return GetResourceIsCustom(resource);
 }
 
 void* ResourceManager::GetResourceRawPointer(std::shared_ptr<IResource> resource) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     if (resource == nullptr) {
         return nullptr;
     }
@@ -511,12 +564,14 @@ void* ResourceManager::GetResourceRawPointer(std::shared_ptr<IResource> resource
 }
 
 void* ResourceManager::GetResourceRawPointer(const char* name) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(name);
 
     return GetResourceRawPointer(resource);
 }
 
 void* ResourceManager::GetResourceRawPointer(uint64_t crc) {
+    AllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend
     auto resource = LoadResource(crc);
 
     return GetResourceRawPointer(resource);
