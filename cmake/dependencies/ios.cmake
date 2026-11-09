@@ -7,6 +7,14 @@ include(FetchContent)
 set(sdl2_scene_patch_file ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies/patches/sdl2-uikit-scene-lifecycle.patch)
 set(sdl2_apply_patch_command ${CMAKE_COMMAND} -Dpatch_file=${sdl2_scene_patch_file} -Dwith_reset=TRUE -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/dependencies/git-patch.cmake)
 
+# LUS_SHARED_SDL: the game is a module of a host app (i64) that embeds SDL as
+# @rpath/libSDL2-2.0.0.dylib; link SDL dynamically so the module uses the
+# host's copy at run time (the host's window is an SDL_Window of that copy).
+if (LUS_SHARED_SDL)
+    set(SDL_SHARED ON CACHE BOOL "" FORCE)
+    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+    set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
+endif()
 find_package(SDL2 QUIET)
 if (NOT ${SDL2_FOUND})
     FetchContent_Declare(
@@ -94,4 +102,8 @@ target_sources(ImGui
 target_include_directories(ImGui PRIVATE ${metalcpp_SOURCE_DIR})
 target_compile_definitions(ImGui PUBLIC IMGUI_IMPL_METAL_CPP)
 
-target_link_libraries(ImGui PUBLIC SDL2::SDL2-static SDL2::SDL2main)
+if (LUS_SHARED_SDL)
+    target_link_libraries(ImGui PUBLIC SDL2::SDL2)
+else()
+    target_link_libraries(ImGui PUBLIC SDL2::SDL2-static SDL2::SDL2main)
+endif()
