@@ -79,6 +79,11 @@ bool GfxRenderingAPIMetal::MetalInit(SDL_Renderer* renderer) {
     NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
 
     mLayer = (CA::MetalLayer*)SDL_RenderGetMetalLayer(renderer);
+#ifdef __IOS__
+    if (getenv("LUS_PIXEL_DIAG")) {
+        mLayer->setFramebufferOnly(false); /* diagnostics: read back presented frames */
+    }
+#endif
     mLayer->setPixelFormat(MTL::PixelFormatBGRA8Unorm);
 
     mDevice = mLayer->device();
@@ -105,12 +110,15 @@ void GfxRenderingAPIMetal::NewFrame() {
     // autoreleases here, or (without an app run loop draining an outer pool)
     // every frame's drawable stays alive, and with it the layer, the SDL
     // Metal view and their IOSurfaces after the window is gone.
-    NS::AutoreleasePool* pool = NS::AutoreleasePool::alloc()->init();
+    static const bool sOldDrawable = getenv("LUS_OLD_DRAWABLE") != nullptr; /* debug A/B (iPhone) */
+    NS::AutoreleasePool* pool = sOldDrawable ? nullptr : NS::AutoreleasePool::alloc()->init();
     SetupScreenFramebuffer(width, height);
 
     MTL::RenderPassDescriptor* current_render_pass = mFramebuffers[0].mRenderPassDescriptor;
     ImGui_ImplMetal_NewFrame(current_render_pass);
-    pool->release();
+    if (pool) {
+        pool->release();
+    }
 }
 
 void GfxRenderingAPIMetal::SetupFloatingFrame() {
@@ -628,9 +636,43 @@ void GfxRenderingAPIMetal::EndFrame() {
         mScreenReadbackRequested = false;
     }
 
+#ifdef __IOS__
+    static int sPixDiag = 0;
+    MTL::Buffer* pixBuf = nullptr;
+    uint32_t pixW = 0, pixH = 0;
+    if (getenv("LUS_PIXEL_DIAG") && (sPixDiag++ % 60) == 30) {
+        MTL::Texture* t = mCurrentDrawable->texture();
+        pixW = (uint32_t) t->width();
+        pixH = (uint32_t) t->height();
+        pixBuf = mDevice->newBuffer(pixW * 4 * pixH, MTL::ResourceStorageModeShared);
+        MTL::BlitCommandEncoder* blit = screen_framebuffer.mCommandBuffer->blitCommandEncoder();
+        blit->copyFromTexture(t, 0, 0, MTL::Origin(0, 0, 0), MTL::Size(pixW, pixH, 1), pixBuf, 0, pixW * 4,
+                              pixW * 4 * pixH);
+        blit->endEncoding();
+    }
+#endif
     screen_framebuffer.mCommandBuffer->presentDrawable(mCurrentDrawable);
     mCurrentVertexBufferPoolIndex = (mCurrentVertexBufferPoolIndex + 1) % kMaxVertexBufferPoolSize;
     screen_framebuffer.mCommandBuffer->commit();
+#ifdef __IOS__
+    if (pixBuf) {
+        screen_framebuffer.mCommandBuffer->waitUntilCompleted();
+        const uint8_t* px = (const uint8_t*) pixBuf->contents();
+        uint64_t sum[3] = { 0, 0, 0 };
+        uint32_t lit = 0, n = 0;
+        for (uint32_t y = 0; y < pixH; y += 8) {
+            for (uint32_t x = 0; x < pixW; x += 8) {
+                const uint8_t* p = px + (y * pixW + x) * 4;
+                sum[0] += p[2]; sum[1] += p[1]; sum[2] += p[0];
+                lit += (p[0] | p[1] | p[2]) > 8;
+                n++;
+            }
+        }
+        SPDLOG_INFO("pixel diag: {}x{} mean rgb {} {} {}, lit {}/{}, status {}", pixW, pixH, sum[0] / n, sum[1] / n,
+                    sum[2] / n, lit, n, (int) screen_framebuffer.mCommandBuffer->status());
+        pixBuf->release();
+    }
+#endif
 
     // Now that commit has been called, retain the command buffer for GPU sync
     // in ReadFramebufferToCPU next frame (waitUntilCompleted before reading).
@@ -699,11 +741,12 @@ int GfxRenderingAPIMetal::CreateFramebuffer() {
 void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t height) {
     // Own the drawable and its texture explicitly instead of relying on an
     // autorelease pool that may not exist yet at this point of a frame.
-    if (mCurrentDrawable != nullptr) {
+    static const bool sOldDrawable = getenv("LUS_OLD_DRAWABLE") != nullptr; /* debug A/B (iPhone) */
+    if (mCurrentDrawable != nullptr && !sOldDrawable) {
         mCurrentDrawable->release();
     }
     mCurrentDrawable = mLayer->nextDrawable();
-    if (mCurrentDrawable != nullptr) {
+    if (mCurrentDrawable != nullptr && !sOldDrawable) {
         mCurrentDrawable->retain();
     }
 
@@ -714,11 +757,27 @@ void GfxRenderingAPIMetal::SetupScreenFramebuffer(uint32_t width, uint32_t heigh
 
     NS::AutoreleasePool* autorelease_pool = NS::AutoreleasePool::alloc()->init();
 
-    if (tex.texture != nullptr) {
+    if (tex.texture != nullptr && !sOldDrawable) {
         tex.texture->release(); /* last frame's drawable texture (retained below) */
     }
     tex.texture = mCurrentDrawable->texture();
-    tex.texture->retain();
+    if (!sOldDrawable) {
+        tex.texture->retain();
+    }
+#ifdef __IOS__
+    {   // diagnostics (i64 module on iPhone): what the game presents into
+        static int sDiag = 0;
+        static const bool sOn = getenv("LUS_PIXEL_DIAG") != nullptr;
+        if (sOn && (sDiag++ % 120) == 0) {
+            CA::MetalLayer* visible = (CA::MetalLayer*)SDL_RenderGetMetalLayer(mRenderer);
+            CGSize ds = mLayer->drawableSize();
+            SPDLOG_INFO("metal diag: setup {}x{}, drawable tex {}x{}, layer {} visible {}, layer drawable {}x{}, "
+                        "fb0 tex id {}",
+                        width, height, tex.texture->width(), tex.texture->height(), (void*)mLayer, (void*)visible,
+                        ds.width, ds.height, fb.mTextureId);
+        }
+    }
+#endif
 
     MTL::RenderPassDescriptor* render_pass_descriptor = MTL::RenderPassDescriptor::renderPassDescriptor();
     render_pass_descriptor->colorAttachments()->object(0)->setTexture(tex.texture);

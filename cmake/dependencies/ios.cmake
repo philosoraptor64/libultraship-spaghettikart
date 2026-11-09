@@ -10,12 +10,24 @@ set(sdl2_apply_patch_command ${CMAKE_COMMAND} -Dpatch_file=${sdl2_scene_patch_fi
 # LUS_SHARED_SDL: the game is a module of a host app (i64) that embeds SDL as
 # @rpath/libSDL2-2.0.0.dylib; link SDL dynamically so the module uses the
 # host's copy at run time (the host's window is an SDL_Window of that copy).
+# LUS_SDL2_PREBUILT=<dir with include/SDL2 and lib/libSDL2-2.0.0.dylib>: use
+# the host's own SDL build (i64's deps-out/ios) instead of building one.
 if (LUS_SHARED_SDL)
     set(SDL_SHARED ON CACHE BOOL "" FORCE)
     set(SDL_STATIC OFF CACHE BOOL "" FORCE)
     set(SDL2_DISABLE_SDL2MAIN ON CACHE BOOL "" FORCE)
 endif()
-find_package(SDL2 QUIET)
+if (LUS_SHARED_SDL AND LUS_SDL2_PREBUILT)
+    add_library(SDL2::SDL2 SHARED IMPORTED GLOBAL)
+    set_target_properties(SDL2::SDL2 PROPERTIES
+        IMPORTED_LOCATION ${LUS_SDL2_PREBUILT}/lib/libSDL2-2.0.0.dylib
+        IMPORTED_SONAME @rpath/libSDL2-2.0.0.dylib
+        INTERFACE_INCLUDE_DIRECTORIES "${LUS_SDL2_PREBUILT}/include;${LUS_SDL2_PREBUILT}/include/SDL2")
+    set(SDL2_INCLUDE_DIRS ${LUS_SDL2_PREBUILT}/include/SDL2)
+    set(SDL2_FOUND TRUE)
+else()
+    find_package(SDL2 QUIET)
+endif()
 if (NOT ${SDL2_FOUND})
     FetchContent_Declare(
         SDL2

@@ -248,6 +248,19 @@ void Fast3dGui::RefreshImGuiGamepads() {
 }
 
 void Fast3dGui::ImGuiRenderDrawData(ImDrawData* data) {
+#ifdef __IOS__
+    {   // diagnostics (i64 module on iPhone)
+        static int sDiag = 0;
+        static const bool sOn = getenv("LUS_PIXEL_DIAG") != nullptr;
+        if (sOn && (sDiag++ % 120) == 0) {
+            SPDLOG_INFO("imgui diag: backend {}, display {}x{} at {},{} scale {}x{}, lists {}, vtx {}", (int) mImpl.Backend,
+                        data ? data->DisplaySize.x : -1.0f, data ? data->DisplaySize.y : -1.0f,
+                        data ? data->DisplayPos.x : 0.0f, data ? data->DisplayPos.y : 0.0f,
+                        data ? data->FramebufferScale.x : 0.0f, data ? data->FramebufferScale.y : 0.0f,
+                        data ? data->CmdListsCount : -1, data ? data->TotalVtxCount : -1);
+        }
+    }
+#endif
     switch (mImpl.Backend) {
 #ifdef ENABLE_OPENGL
         case WindowBackend::FAST3D_SDL_OPENGL:

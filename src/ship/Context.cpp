@@ -482,6 +482,11 @@ std::string Context::GetAppBundlePath() {
 #endif
 
 #ifdef __IOS__
+    // A host app running the game as a module (i64) points SHIP_HOME at the
+    // game's own data folder; otherwise the app's Documents (Files app).
+    if (const char* shipHome = getenv("SHIP_HOME"); shipHome != nullptr && shipHome[0] != '\0') {
+        return std::string(shipHome);
+    }
     const char* home = getenv("HOME");
     return std::string(home) + "/Documents";
 #endif
@@ -545,6 +550,11 @@ std::string Context::GetAppDirectoryPath(const std::string& appName) {
 #endif
 
 #ifdef __IOS__
+    // A host app running the game as a module (i64) points SHIP_HOME at the
+    // game's own data folder; otherwise the app's Documents (Files app).
+    if (const char* shipHome = getenv("SHIP_HOME"); shipHome != nullptr && shipHome[0] != '\0') {
+        return std::string(shipHome);
+    }
     const char* home = getenv("HOME");
     return std::string(home) + "/Documents";
 #endif
