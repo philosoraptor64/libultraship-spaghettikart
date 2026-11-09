@@ -739,10 +739,12 @@ void GfxWindowBackendSDL2::SyncFramerateWithTime() const {
         t = qpc_to_100ns(SDL_GetPerformanceCounter());
     }
 #endif
-    if (left > 0 && t - next < 10000) {
-        // In case it takes some time for the application to wake up after sleep,
-        // or inaccurate mTimer,
-        // don't let that slow down the framerate.
+    // Keep the frame grid when a frame is late by less than one interval (a
+    // slow wake-up from the sleep, an inaccurate timer): re-basing on the actual
+    // time loses that time for good, so the game ran slightly below the target
+    // rate (59.5 fps at 60), which netplay time sync turns into skipped steps.
+    const int64_t interval = 10 * FRAME_INTERVAL_US_NUMERATOR / FRAME_INTERVAL_US_DENOMINATOR;
+    if (static_cast<int64_t>(t) - next < interval) {
         t = next;
     }
     previous_time = t;
