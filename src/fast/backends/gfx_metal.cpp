@@ -7,6 +7,8 @@
 
 #ifdef __APPLE__
 
+#include <unordered_set>
+
 #include "fast/backends/gfx_metal.h"
 
 #include <vector>
@@ -1293,6 +1295,58 @@ bool Metal_IsSupported() {
 
     return count > 0;
 #endif
+}
+
+
+// Re-entry (a game started and stopped several times in one app, e.g. inside
+// the i64 launcher): release everything this backend created, or every
+// restart leaks the GPU objects (pipelines, textures, buffers, command
+// queues). The layer and device are borrowed from SDL's renderer and are not
+// released here. Each object is released once even when two slots share it.
+// (Same idea as the BattleShip fork's destructor, for this backend's members.)
+Fast::GfxRenderingAPIMetal::~GfxRenderingAPIMetal() {
+    std::unordered_set<const void*> released;
+    auto drop = [&](auto*& obj) {
+        if (obj != nullptr && released.insert(obj).second) {
+            obj->release();
+        }
+        obj = nullptr;
+    };
+    for (auto& kv : mShaderProgramPool) {
+        for (auto*& v : kv.second.pipeline_state_variants) {
+            drop(v);
+        }
+    }
+    mShaderProgramPool.clear();
+    mShaderProgram = nullptr;
+    for (auto& t : mTextures) {
+        drop(t.texture);
+        drop(t.msaaTexture);
+        drop(t.sampler);
+    }
+    mTextures.clear();
+    for (auto& fb : mFramebuffers) {
+        fb.mLastShaderProgram = nullptr;
+        drop(fb.mDepthTexture);
+        drop(fb.mMsaaDepthTexture);
+        delete fb.mScissorRect;
+        fb.mScissorRect = nullptr;
+        delete fb.mViewport;
+        fb.mViewport = nullptr;
+    }
+    mFramebuffers.clear();
+    for (auto*& b : mVertexBufferPool) {
+        drop(b);
+    }
+    drop(mFrameUniformBuffer);
+    drop(mCoordUniformBuffer);
+    drop(mDepthValueOutputBuffer);
+    drop(mScreenReadbackBuffer);
+    drop(mConvertToRgb5a1PipelineState);
+    drop(mDepthComputeFunction);
+    drop(mConvertToRgb5a1Function);
+    drop(mReadbackQueue);
+    drop(mCommandQueue);
 }
 
 #endif
