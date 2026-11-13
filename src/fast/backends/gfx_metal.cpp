@@ -674,6 +674,23 @@ void GfxRenderingAPIMetal::EndFrame() {
                                   (size_t) sCaptureW * 4, (size_t) sCaptureW * 4 * sCaptureH);
             blit->endEncoding();
             sCapturePhase = 2;
+            {
+                MTL::Buffer* capBuf = (MTL::Buffer*) sCaptureBuf;
+                const uint32_t cw = sCaptureW, ch = sCaptureH;
+                auto cb = gLusFrameCaptureCallback;
+                screen_framebuffer.mCommandBuffer->addCompletedHandler([capBuf, cw, ch, cb](MTL::CommandBuffer*) {
+                    std::vector<uint8_t> rgba((size_t) cw * ch * 4);
+                    const uint8_t* src = (const uint8_t*) capBuf->contents();
+                    for (size_t k = 0; k < (size_t) cw * ch; k++) {
+                        rgba[4 * k + 0] = src[4 * k + 2];
+                        rgba[4 * k + 1] = src[4 * k + 1];
+                        rgba[4 * k + 2] = src[4 * k + 0];
+                        rgba[4 * k + 3] = 255;
+                    }
+                    capBuf->release();
+                    if (cb) cb(rgba.data(), cw, ch);
+                });
+            }
         } else if (sCapturePhase == 0) {
             mLayer->setFramebufferOnly(false); /* readable drawables from now until the copy */
             sCapturePhase = 1;
@@ -707,27 +724,13 @@ void GfxRenderingAPIMetal::EndFrame() {
     }
 #endif
 
-    if (sCapturePhase == 2) {
-        screen_framebuffer.mCommandBuffer->waitUntilCompleted(); /* once, for the launcher's picture */
-        std::vector<uint8_t> rgba((size_t) sCaptureW * sCaptureH * 4);
-        const uint8_t* src = (const uint8_t*) sCaptureBuf->contents();
-        for (size_t k = 0; k < (size_t) sCaptureW * sCaptureH; k++) {
-            rgba[4 * k + 0] = src[4 * k + 2];
-            rgba[4 * k + 1] = src[4 * k + 1];
-            rgba[4 * k + 2] = src[4 * k + 0];
-            rgba[4 * k + 3] = 255;
-        }
-        sCaptureBuf->release();
-        sCaptureBuf = nullptr;
+    if (sCapturePhase == 2) { /* the copy finishes on Metal's completion thread (CaptureDone); no wait here */
         gLusFrameCaptureRequest = 0;
         sCapturePhase = 0;
 #ifdef __IOS__
         if (!getenv("LUS_PIXEL_DIAG"))
 #endif
             mLayer->setFramebufferOnly(true);
-        if (gLusFrameCaptureCallback) {
-            gLusFrameCaptureCallback(rgba.data(), sCaptureW, sCaptureH);
-        }
     }
 
     // Now that commit has been called, retain the command buffer for GPU sync
@@ -886,9 +889,18 @@ void GfxRenderingAPIMetal::UpdateFramebufferParameters(int fb_id, uint32_t width
     // Screen framebuffer is handled separately on a frame by frame basis
     // see `SetupScreenFramebuffer`.
     if (fb_id == 0) {
+        const uint32_t ww = width, hh = height;
         int width, height;
         SDL_GetRendererOutputSize(mRenderer, &width, &height);
         mLayer->setDrawableSize({ CGFloat(width), CGFloat(height) });
+        if (getenv("LUS_SIZE_LOG")) {
+            static int lw = 0, lh = 0;
+            if (width != lw || height != lh) {
+                SPDLOG_INFO("size log: renderer output {}x{} (requested fb0 {}x{})", width, height, ww, hh);
+                lw = width;
+                lh = height;
+            }
+        }
 
         return;
     }

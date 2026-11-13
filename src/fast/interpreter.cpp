@@ -5097,6 +5097,15 @@ bool Interpreter::ViewportMatchesRendererResolution() {
 void Interpreter::StartFrame() {
     mWapi->GetDimensions(&mGfxCurrentWindowDimensions.width, &mGfxCurrentWindowDimensions.height, &mCurWindowPosX,
                          &mCurWindowPosY);
+    if (getenv("LUS_SIZE_LOG")) {
+        static uint32_t lw = 0, lh = 0;
+        if (mGfxCurrentWindowDimensions.width != lw || mGfxCurrentWindowDimensions.height != lh) {
+            SPDLOG_INFO("size log: window {}x{}, game {}x{}", mGfxCurrentWindowDimensions.width,
+                        mGfxCurrentWindowDimensions.height, mCurDimensions.width, mCurDimensions.height);
+            lw = mGfxCurrentWindowDimensions.width;
+            lh = mGfxCurrentWindowDimensions.height;
+        }
+    }
     if (mCurDimensions.height == 0) {
         // Avoid division by zero
         mCurDimensions.height = 1;
