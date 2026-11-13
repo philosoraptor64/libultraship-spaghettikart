@@ -417,6 +417,12 @@ class Interpreter {
     // private: TODO make these private
     void Flush();
     ShaderProgram* LookupOrCreateShaderProgram(uint64_t id0, uint64_t id1);
+    void ShaderPrewarm();
+    void ShaderListRecord(uint64_t id0, uint64_t id1);
+    static std::string ShaderListPath();
+    bool mShaderPrewarmDone = false;
+    bool mShaderListOff = false;
+    std::set<std::pair<uint64_t, uint64_t>> mShaderListKnown;
     ColorCombiner* LookupOrCreateColorCombiner(const ColorCombinerKey& key);
     void ShaderCacheClear();
     void TextureCacheClear();
