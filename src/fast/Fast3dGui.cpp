@@ -372,6 +372,11 @@ void Fast3dGui::CalculateGameViewport() {
     ImGui::End();
 }
 
+/* The part of the game's picture to show, in 0..1 of its width/height: {x0, y0, x1, y1}. The game picks it each
+ * frame (SpaghettiKart netplay: one device shows its own player's quarter of a 3-4 player split screen, full
+ * size). The shown part keeps its aspect ratio inside the window (letterboxed if needed). */
+extern "C" volatile float gLusPresentRegion[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+
 void Fast3dGui::DrawGame() {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -429,8 +434,24 @@ void Fast3dGui::DrawGame() {
     }
     uintptr_t fb = Ship::Context::GetRawInstance()->GetWindow()->GetGfxFrameBuffer();
     if (fb) {
-        ImGui::SetCursorPos(pos);
-        ImGui::Image(reinterpret_cast<ImTextureID>(fb), size);
+        const ImVec2 uv0(gLusPresentRegion[0], gLusPresentRegion[1]), uv1(gLusPresentRegion[2], gLusPresentRegion[3]);
+        const float rw = uv1.x - uv0.x, rh = uv1.y - uv0.y;
+        if (rw > 0.0f && rh > 0.0f && rw <= 1.0f && rh <= 1.0f && (rw < 1.0f || rh < 1.0f)) {
+            /* a part of the picture, keeping its proportions: rw x rh of the image drawn at `size` */
+            const float want = (size.x * rw) / (size.y * rh); /* aspect of that part on screen as it was */
+            ImVec2 fit = size;
+            if (size.x / size.y > want) {
+                fit.x = floor(size.y * want);
+            } else {
+                fit.y = floor(size.x / want);
+            }
+            pos = ImVec2(pos.x + floor((size.x - fit.x) / 2.0f), pos.y + floor((size.y - fit.y) / 2.0f));
+            ImGui::SetCursorPos(pos);
+            ImGui::Image(reinterpret_cast<ImTextureID>(fb), fit, uv0, uv1);
+        } else {
+            ImGui::SetCursorPos(pos);
+            ImGui::Image(reinterpret_cast<ImTextureID>(fb), size);
+        }
     }
 
     ImGui::End();
