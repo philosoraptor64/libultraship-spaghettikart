@@ -10,11 +10,17 @@ int32_t osEepromProbe(OSMesgQueue* mq) {
     return EEPROM_TYPE_4K;
 }
 
+// the EEPROM save's file name in the app directory; a host app (i64) may pick another one per run (e.g. the
+// "everything unlocked" save)
+extern "C" {
+const char* gLusEepromFile = "default.sav";
+}
+
 int32_t osEepromLongRead(OSMesgQueue* mq, uint8_t address, uint8_t* buffer, int32_t length) {
     u8 content[512];
     s32 ret = -1;
 
-    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory("default.sav");
+    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory(gLusEepromFile);
     FILE* fp = fopen(save_file.c_str(), "rb");
     if (fp == NULL) {
         return -1;
@@ -43,7 +49,7 @@ int32_t osEepromLongWrite(OSMesgQueue* mq, uint8_t address, uint8_t* buffer, int
     // app is stopped mid-write (a crash, iOS ending it, a dropped online match), the old save
     // stays whole. Writing it in place could leave it empty, and the next partial write
     // would then fill the rest of the save with zeros.
-    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory("default.sav");
+    const std::string save_file = Ship::Context::GetPathRelativeToAppDirectory(gLusEepromFile);
     const std::string tmp_file = save_file + ".tmp";
     FILE* fp = fopen(tmp_file.c_str(), "wb");
     if (fp == NULL) {
