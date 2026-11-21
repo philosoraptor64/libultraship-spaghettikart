@@ -10,6 +10,31 @@
 #define strdup _strdup
 #endif
 
+extern "C" {
+extern int (*LUS_AllocScopeSuspend)(void);
+extern void (*LUS_AllocScopeResume)(int);
+}
+
+namespace {
+// A setting created or changed while a game routes its allocations into a snapshotted heap (Mario Kart's sim heap
+// during a race) would put the setting's table entries there, and the next rollback would overwrite them: the
+// table then crashes in any later lookup (2026-11-21: EXC_BAD_ACCESS at 0x3f800000 in GetInteger, from a race
+// replayed with MK64_SYNCTEST). Settings always live on the normal heap.
+struct CVarAllocScopeGuard {
+    int saved = 0;
+    CVarAllocScopeGuard() {
+        if (LUS_AllocScopeSuspend) {
+            saved = LUS_AllocScopeSuspend();
+        }
+    }
+    ~CVarAllocScopeGuard() {
+        if (LUS_AllocScopeResume) {
+            LUS_AllocScopeResume(saved);
+        }
+    }
+};
+} // namespace
+
 namespace Ship {
 
 ConsoleVariable::ConsoleVariable() {
@@ -89,6 +114,7 @@ Color_RGB8 ConsoleVariable::GetColor24(const char* name, Color_RGB8 defaultValue
 }
 
 void ConsoleVariable::SetInteger(const char* name, int32_t value) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto& variable = mVariables[name];
     if (variable == nullptr) {
         variable = std::make_shared<CVar>();
@@ -99,6 +125,7 @@ void ConsoleVariable::SetInteger(const char* name, int32_t value) {
 }
 
 void ConsoleVariable::SetFloat(const char* name, float value) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto& variable = mVariables[name];
     if (variable == nullptr) {
         variable = std::make_shared<CVar>();
@@ -109,6 +136,7 @@ void ConsoleVariable::SetFloat(const char* name, float value) {
 }
 
 void ConsoleVariable::SetString(const char* name, const char* value) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto& variable = mVariables[name];
     if (variable == nullptr) {
         variable = std::make_shared<CVar>();
@@ -122,6 +150,7 @@ void ConsoleVariable::SetString(const char* name, const char* value) {
 }
 
 void ConsoleVariable::SetColor(const char* name, Color_RGBA8 value) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto& variable = mVariables[name];
     if (!variable) {
         variable = std::make_shared<CVar>();
@@ -142,24 +171,28 @@ void ConsoleVariable::SetColor24(const char* name, Color_RGB8 value) {
 }
 
 void ConsoleVariable::RegisterInteger(const char* name, int32_t defaultValue) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     if (Get(name) == nullptr) {
         SetInteger(name, defaultValue);
     }
 }
 
 void ConsoleVariable::RegisterFloat(const char* name, float defaultValue) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     if (Get(name) == nullptr) {
         SetFloat(name, defaultValue);
     }
 }
 
 void ConsoleVariable::RegisterString(const char* name, const char* defaultValue) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     if (Get(name) == nullptr) {
         SetString(name, defaultValue);
     }
 }
 
 void ConsoleVariable::RegisterColor(const char* name, Color_RGBA8 defaultValue) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     if (Get(name) == nullptr) {
         SetColor(name, defaultValue);
     }
@@ -172,6 +205,7 @@ void ConsoleVariable::RegisterColor24(const char* name, Color_RGB8 defaultValue)
 }
 
 void ConsoleVariable::ClearVariable(const char* name) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     std::shared_ptr<Config> conf = Context::GetRawInstance()->GetConfig();
     auto var = Get(name);
     if (var != nullptr) {
@@ -202,12 +236,14 @@ void ConsoleVariable::ClearVariable(const char* name) {
 }
 
 void ConsoleVariable::ClearBlock(const char* name) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     std::shared_ptr<Config> conf = Context::GetRawInstance()->GetConfig();
     conf->EraseBlock(StringHelper::Sprintf("CVars.%s", name));
     Load();
 }
 
 void ConsoleVariable::CopyVariable(const char* from, const char* to) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto& variableFrom = mVariables[from];
     if (!variableFrom) {
         return;
@@ -241,6 +277,7 @@ void ConsoleVariable::CopyVariable(const char* from, const char* to) {
 }
 
 void ConsoleVariable::Save() {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     std::shared_ptr<Config> conf = Context::GetRawInstance()->GetConfig();
 
     for (const auto& variable : mVariables) {
@@ -277,6 +314,7 @@ void ConsoleVariable::Save() {
 }
 
 void ConsoleVariable::Load() {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     std::shared_ptr<Config> conf = Context::GetRawInstance()->GetConfig();
     conf->Reload();
     if (!mVariables.empty()) {
@@ -290,6 +328,7 @@ void ConsoleVariable::Load() {
 
 void ConsoleVariable::LoadFromPath(
     std::string path, nlohmann::detail::iteration_proxy<nlohmann::detail::iter_impl<nlohmann::json>> items) {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     if (!path.empty()) {
         path += ".";
     }
@@ -337,6 +376,7 @@ void ConsoleVariable::LoadFromPath(
     }
 }
 void ConsoleVariable::LoadLegacy() {
+    CVarAllocScopeGuard allocScopeGuard; // see LUS_AllocScopeSuspend (ResourceManager.cpp)
     auto conf = Context::GetPathRelativeToAppDirectory("cvars.cfg");
     if (DiskFile::Exists(conf)) {
         const auto lines = DiskFile::ReadAllLines(conf);
